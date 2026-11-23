@@ -119,20 +119,27 @@ const HTML_UI = `<!DOCTYPE html>
           const mediaUrls = Array.isArray(data.media_urls) ? data.media_urls : [];
           const debugUrls = Array.isArray(data.debug_urls) ? data.debug_urls : [];
           statusEl.textContent =
-            "Captured media URLs: " +
+            "Captured: " +
             mediaUrls.length +
-            " | Seen URLs: " +
-            debugUrls.length;
+            " | Seen: " +
+            debugUrls.length +
+            " | Status: " +
+            (data.main_status ?? "?") +
+            " | Title: " +
+            (data.page_title || "n/a");
 
           if (mediaUrls.length > 0) {
             outEl.textContent = mediaUrls.join(NL);
-          } else if (debugUrls.length > 0) {
-            outEl.textContent =
-              "No direct media match. Sample network URLs:" +
-              NL +
-              debugUrls.join(NL);
           } else {
-            outEl.textContent = "No media URL captured";
+            outEl.textContent =
+              "Seen URLs:" +
+              NL +
+              debugUrls.join(NL) +
+              NL +
+              NL +
+              "HTML Preview:" +
+              NL +
+              (data.html_preview || "");
           }
           outEl.style.display = "block";
         }
@@ -213,6 +220,7 @@ async function triggerPlayInAllFrames(page) {
 async function captureMediaWithBrowser(browserBinding, targetUrl) {
   const captured = new Set();
   const seen = new Set();
+  let mainStatus = null;
   const browser = await launch(browserBinding);
 
   try {
@@ -240,6 +248,9 @@ async function captureMediaWithBrowser(browserBinding, targetUrl) {
     page.on("response", (res) => {
       const resUrl = res.url();
       const ct = res.headers()["content-type"] || "";
+      if (mainStatus === null && res.request().isNavigationRequest()) {
+        mainStatus = res.status();
+      }
       if (!isBlocked(resUrl)) {
         seen.add(resUrl);
         if (looksLikeMediaUrl(resUrl, ct)) {
@@ -248,18 +259,27 @@ async function captureMediaWithBrowser(browserBinding, targetUrl) {
       }
     });
 
-    await page.goto(targetUrl, {
+    const navRes = await page.goto(targetUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
+    if (navRes && mainStatus === null) {
+      mainStatus = navRes.status();
+    }
 
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(4000);
     await triggerPlayInAllFrames(page);
-    await page.waitForTimeout(7000);
+    await page.waitForTimeout(5000);
+
+    const pageTitle = await page.title().catch(() => "");
+    const html = await page.content().catch(() => "");
 
     return {
       mediaUrls: [...captured],
       debugUrls: [...seen].slice(0, 30),
+      mainStatus,
+      pageTitle,
+      htmlPreview: html.slice(0, 600),
     };
   } finally {
     await browser.close();
@@ -305,6 +325,9 @@ export default {
           stream_url: preferred,
           media_urls: result.mediaUrls,
           debug_urls: result.debugUrls,
+          main_status: result.mainStatus,
+          page_title: result.pageTitle,
+          html_preview: result.htmlPreview,
         });
       } catch (err) {
         return Response.json(
