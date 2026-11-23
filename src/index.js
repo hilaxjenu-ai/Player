@@ -181,13 +181,14 @@ async function extract(env, targetUrl) {
       locale: "en-US",
     });
 
-    context.on("page", (popup) => {
-      // Popups are almost always ads; record nothing and close them.
-      popup.close().catch(() => {});
-    });
-
     const page = await context.newPage();
     attach(page);
+
+    context.on("page", (popup) => {
+      // Popups are almost always ads; close any page that is not the main one.
+      if (popup === page) return;
+      popup.close().catch(() => {});
+    });
 
     try {
       const resp = await page.goto(targetUrl, {
