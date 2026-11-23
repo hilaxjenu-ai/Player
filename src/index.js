@@ -71,6 +71,7 @@ const HTML_UI = `<!DOCTYPE html>
       word-break: break-all;
       font-size: 13px;
       color: #38bdf8;
+      white-space: pre-wrap;
     }
   </style>
 </head>
@@ -118,7 +119,9 @@ const HTML_UI = `<!DOCTYPE html>
           const mediaUrls = Array.isArray(data.media_urls) ? data.media_urls : [];
           statusEl.textContent = "Captured media URLs: " + mediaUrls.length;
           outEl.textContent =
-            data.stream_url || mediaUrls.join(NL) || "No media URL captured";
+            mediaUrls.length > 0
+              ? mediaUrls.join(NL)
+              : "No media URL captured";
           outEl.style.display = "block";
         }
       } catch (e) {
@@ -156,15 +159,43 @@ function looksLikeMediaUrl(urlStr, contentType = "") {
     ct.startsWith("video/") ||
     ct.startsWith("audio/") ||
     ct.includes("mpegurl") ||
-    ct.includes("dash+xml")
+    ct.includes("dash+xml") ||
+    ct.includes("x-mpegurl")
   ) {
     return true;
   }
 
   return (
     /\.(mp4|m3u8|mpd|m4s|ts|webm|mkv)(\?|#|$)/i.test(u) ||
-    /stream=1|playlist\.m3u8|master\.m3u8/i.test(u)
+    /stream=1|playlist\.m3u8|master\.m3u8|manifest/i.test(u)
   );
+}
+
+async function triggerPlayInAllFrames(page) {
+  for (const frame of page.frames()) {
+    try {
+      await frame.evaluate(async () => {
+        const videos = [...document.querySelectorAll("video")];
+        for (const v of videos) {
+          try {
+            v.muted = true;
+            await v.play();
+          } catch {}
+        }
+
+        const btns = [
+          ...document.querySelectorAll(
+            "[class*='play'], [id*='play'], button[aria-label*='play' i], .vjs-big-play-button, .jw-icon-playback"
+          ),
+        ];
+        for (const b of btns.slice(0, 4)) {
+          try {
+            b.click();
+          } catch {}
+        }
+      });
+    } catch {}
+  }
 }
 
 async function captureMediaWithBrowser(browserBinding, targetUrl) {
@@ -200,32 +231,12 @@ async function captureMediaWithBrowser(browserBinding, targetUrl) {
 
     await page.goto(targetUrl, {
       waitUntil: "domcontentloaded",
-      timeout: 25000,
+      timeout: 30000,
     });
 
-    await page.waitForTimeout(4000);
-
-    await page.evaluate(async () => {
-      const videos = [...document.querySelectorAll("video")];
-      for (const v of videos) {
-        try {
-          v.muted = true;
-          await v.play();
-        } catch {}
-      }
-      const playBtns = [
-        ...document.querySelectorAll(
-          "[class*='play'], [id*='play'], button[aria-label*='play' i]"
-        ),
-      ];
-      for (const b of playBtns.slice(0, 3)) {
-        try {
-          b.click();
-        } catch {}
-      }
-    });
-
-    await page.waitForTimeout(4000);
+    await page.waitForTimeout(5000);
+    await triggerPlayInAllFrames(page);
+    await page.waitForTimeout(6000);
 
     return [...captured];
   } finally {
