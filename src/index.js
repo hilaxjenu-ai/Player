@@ -14,6 +14,9 @@ const AD_KEYWORDS = [
 
 const SKIP_WORDS = ["sample", "trailer", "promo", "preview", "teaser"];
 
+const DESKTOP_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 const HTML_UI = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -224,7 +227,18 @@ async function captureMediaWithBrowser(browserBinding, targetUrl) {
   const browser = await launch(browserBinding);
 
   try {
-    const page = await browser.newPage();
+    const origin = new URL(targetUrl).origin + "/";
+    const context = await browser.newContext({
+      userAgent: DESKTOP_UA,
+      viewport: { width: 1280, height: 720 },
+      locale: "en-US",
+      extraHTTPHeaders: {
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: origin,
+      },
+    });
+
+    const page = await context.newPage();
 
     await page.route("**/*", (route) => {
       const reqUrl = route.request().url();
