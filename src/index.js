@@ -1,496 +1,378 @@
-import { launch } from "@cloudflare/playwright";
-
-const AD_KEYWORDS = [
-  "doubleclick",
-  "googlesyndication",
-  "popads",
-  "propeller",
-  "adsterra",
-  "exoclick",
-  "onclick",
-  "trafficjunky",
-  "analytics",
-];
-
-const SKIP_WORDS = ["sample", "trailer", "promo", "preview", "teaser"];
-
-const DESKTOP_UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-const HTML_UI = `<!DOCTYPE html>
+const HTML_PLAYER = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cloudflare Stream Player & Extractor</title>
+  <title>Direct Stream Player</title>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
   <style>
     * { box-sizing: border-box; }
     body {
+      margin: 0;
+      min-height: 100vh;
+      background: #090d16;
+      color: #f1f5f9;
       font-family: system-ui, -apple-system, sans-serif;
-      background: #0f172a;
-      color: #f8fafc;
       display: flex;
       justify-content: center;
-      padding: 28px 14px;
-      margin: 0;
+      align-items: flex-start;
+      padding: 24px 14px;
     }
-    .card {
-      background: #1e293b;
-      padding: 20px;
-      border-radius: 14px;
+    .app {
       width: 100%;
       max-width: 820px;
-      box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
     }
-    h2 { margin: 0 0 14px; font-size: 20px; }
-    .row {
+    .title {
+      margin: 0 0 14px;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .controls {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
       margin-bottom: 14px;
     }
-    input {
+    .url-input {
       flex: 1 1 280px;
       padding: 12px 14px;
-      border-radius: 9px;
-      border: 1px solid #334155;
-      background: #0f172a;
+      border-radius: 10px;
+      border: 1px solid #374151;
+      background: #090d16;
       color: #fff;
       font-size: 14px;
+      outline: none;
     }
-    button {
+    .url-input:focus {
+      border-color: #3b82f6;
+    }
+    .btn {
       padding: 12px 16px;
       border: none;
-      border-radius: 9px;
-      background: #3b82f6;
-      color: white;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    button.play-btn { background: #10b981; }
-    button.secondary-btn { background: #475569; padding: 8px 12px; font-size: 12px; }
-    button:disabled { opacity: 0.6; cursor: not-allowed; }
-    .player-wrap {
-      background: #000;
       border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      cursor: pointer;
+    }
+    .btn-direct { background: #16a34a; }
+    .btn-proxy { background: #2563eb; }
+    .btn-stop { background: #475569; }
+    .stage {
+      width: 100%;
+      background: #000;
+      border: 1px solid #1f2937;
+      border-radius: 12px;
       overflow: hidden;
-      margin-top: 10px;
-      border: 1px solid #334155;
     }
     video {
       width: 100%;
-      max-height: 440px;
+      max-height: 450px;
       display: block;
       background: #000;
     }
-    .status {
-      color: #94a3b8;
-      font-size: 13px;
-      white-space: pre-line;
-      margin-top: 10px;
-    }
-    .box {
-      background: #0f172a;
-      padding: 12px;
-      border-radius: 9px;
+    .meta {
       margin-top: 12px;
-      word-break: break-all;
-      font-size: 12px;
-      color: #38bdf8;
+      padding: 12px;
+      border-radius: 10px;
+      background: #090d16;
+      border: 1px solid #1f2937;
+      font-size: 13px;
+      color: #94a3b8;
       white-space: pre-wrap;
+      word-break: break-word;
     }
-    .url-item {
+    .quick-row {
       display: flex;
       flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
       gap: 8px;
-      padding: 8px 0;
-      border-bottom: 1px solid #1e293b;
+      margin-top: 10px;
     }
-    .url-item:last-child { border-bottom: none; }
-    .url-text { flex: 1 1 260px; color: #e2e8f0; }
+    .chip {
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #cbd5e1;
+      font-size: 12px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>Stream Player & Extractor</h2>
-    <div class="row">
-      <input id="urlInput" type="text" placeholder="Paste .mp4 / .m3u8 stream URL or video page URL..." />
-      <button id="playBtn" class="play-btn" type="button">Play</button>
-      <button id="extractBtn" type="button">Extract</button>
+  <div class="app">
+    <h1 class="title">Direct Stream Player</h1>
+
+    <div class="controls">
+      <input
+        id="streamUrl"
+        class="url-input"
+        type="url"
+        placeholder="Paste .mp4 / .m3u8 / .webm link here..."
+      />
+      <button id="playDirect" class="btn btn-direct" type="button">Play Direct</button>
+      <button id="playProxy" class="btn btn-proxy" type="button">Play via Proxy</button>
+      <button id="stopBtn" class="btn btn-stop" type="button">Stop</button>
     </div>
 
-    <div class="player-wrap">
-      <video id="videoPlayer" controls playsinline preload="metadata"></video>
+    <div class="stage">
+      <video id="player" controls playsinline preload="metadata"></video>
     </div>
 
-    <div id="status" class="status">Direct .mp4 / .m3u8 link potu Play click pannunga, illai page URL potu Extract pannunga.</div>
-    <div id="output" class="box" style="display:none;"></div>
+    <div id="statusBox" class="meta">Ready. Direct stream link paste panni Play Direct or Play via Proxy click pannunga.</div>
+
+    <div class="quick-row">
+      <button
+        id="sampleMp4"
+        class="chip"
+        type="button"
+        data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+      >
+        Test Sample MP4
+      </button>
+      <button id="checkHeadersBtn" class="chip" type="button">
+        Check Link Status
+      </button>
+    </div>
   </div>
 
   <script>
-    const inputEl = document.getElementById("urlInput");
-    const playBtn = document.getElementById("playBtn");
-    const extractBtn = document.getElementById("extractBtn");
-    const videoEl = document.getElementById("videoPlayer");
-    const statusEl = document.getElementById("status");
-    const outEl = document.getElementById("output");
-    const NL = String.fromCharCode(10);
+    const inputEl = document.getElementById("streamUrl");
+    const directBtn = document.getElementById("playDirect");
+    const proxyBtn = document.getElementById("playProxy");
+    const stopBtn = document.getElementById("stopBtn");
+    const sampleBtn = document.getElementById("sampleMp4");
+    const checkBtn = document.getElementById("checkHeadersBtn");
+    const videoEl = document.getElementById("player");
+    const statusEl = document.getElementById("statusBox");
 
-    let hlsInstance = null;
+    let hls = null;
 
-    function destroyHls() {
-      if (hlsInstance) {
-        hlsInstance.destroy();
-        hlsInstance = null;
-      }
+    function setStatus(msg) {
+      statusEl.textContent = msg;
     }
 
-    function playStreamUrl(rawUrl) {
-      const streamUrl = (rawUrl || "").trim();
-      if (!streamUrl) {
-        statusEl.textContent = "Stream URL podunga first.";
-        return;
+    function cleanupPlayer() {
+      if (hls) {
+        hls.destroy();
+        hls = null;
       }
-
-      inputEl.value = streamUrl;
-      destroyHls();
       videoEl.pause();
       videoEl.removeAttribute("src");
       videoEl.load();
+    }
 
-      const isHls = /\.m3u8(\?|#|$)/i.test(streamUrl);
+    function startPlayback(useProxy) {
+      const rawUrl = inputEl.value.trim();
+      if (!rawUrl) {
+        setStatus("First stream URL podunga.");
+        return;
+      }
 
-      if (isHls && window.Hls && window.Hls.isSupported()) {
-        statusEl.textContent = "Loading HLS (.m3u8) stream...";
-        hlsInstance = new window.Hls();
-        hlsInstance.loadSource(streamUrl);
-        hlsInstance.attachMedia(videoEl);
-        hlsInstance.on(window.Hls.Events.MANIFEST_PARSED, function () {
-          statusEl.textContent = "HLS stream ready. Playing...";
-          videoEl.play().catch(function () {});
+      let finalUrl = rawUrl;
+      if (useProxy) {
+        finalUrl = "/stream?url=" + encodeURIComponent(rawUrl);
+      }
+
+      cleanupPlayer();
+      setStatus((useProxy ? "Proxy" : "Direct") + " mode-la load aagudhu:\\n" + rawUrl);
+
+      const isM3u8 = /\.m3u8(\?|#|$)/i.test(rawUrl);
+
+      if (isM3u8 && window.Hls && window.Hls.isSupported()) {
+        hls = new window.Hls({ enableWorker: true });
+        hls.loadSource(finalUrl);
+        hls.attachMedia(videoEl);
+        hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
+          setStatus("HLS manifest loaded. Playing...");
+          videoEl.play().catch(function () {
+            setStatus("HLS ready. Video controls-la Play press pannunga.");
+          });
         });
-        hlsInstance.on(window.Hls.Events.ERROR, function (_, data) {
+        hls.on(window.Hls.Events.ERROR, function (_, data) {
           if (data && data.fatal) {
-            statusEl.textContent = "HLS playback error: " + (data.details || "failed");
+            setStatus("HLS Fatal Error: " + (data.type || "") + " - " + (data.details || "failed"));
           }
         });
-      } else {
-        statusEl.textContent = "Loading video stream...";
-        videoEl.src = streamUrl;
-        videoEl.play().then(function () {
-          statusEl.textContent = "Playing stream.";
-        }).catch(function () {
-          statusEl.textContent = "Stream loaded. Controls moolama play pannunga (or link block aagirukkalaam).";
-        });
+        return;
       }
+
+      videoEl.src = finalUrl;
+      videoEl.play()
+        .then(function () {
+          setStatus("Playing successfully (" + (useProxy ? "Proxy" : "Direct") + ").");
+        })
+        .catch(function (err) {
+          setStatus(
+            "Autoplay/Load note: " +
+              (err && err.message ? err.message : "Controls-la play try pannunga or Check Link Status click pannunga.")
+          );
+        });
     }
 
     videoEl.addEventListener("error", function () {
-      const err = videoEl.error;
-      const codeMap = {
-        1: "Aborted",
-        2: "Network error (CORS / blocked / expired link)",
-        3: "Decode error",
-        4: "Format not supported or blocked by host"
+      const e = videoEl.error;
+      const map = {
+        1: "MEDIA_ERR_ABORTED (Playback stopped)",
+        2: "MEDIA_ERR_NETWORK (Network error / 403 / 404 / expired / blocked)",
+        3: "MEDIA_ERR_DECODE (Video codec/stream corrupted or unsupported)",
+        4: "MEDIA_ERR_SRC_NOT_SUPPORTED (Format not supported or URL returned HTML/error)"
       };
-      const msg = err ? (codeMap[err.code] || ("Code " + err.code)) : "Playback failed";
-      statusEl.textContent = "Player Error: " + msg;
+      setStatus("Video Element Error: " + (e ? (map[e.code] || "Code " + e.code) : "Unknown error"));
     });
 
-    playBtn.addEventListener("click", function () {
-      playStreamUrl(inputEl.value);
+    directBtn.addEventListener("click", function () {
+      startPlayback(false);
     });
 
-    extractBtn.addEventListener("click", async function () {
+    proxyBtn.addEventListener("click", function () {
+      startPlayback(true);
+    });
+
+    stopBtn.addEventListener("click", function () {
+      cleanupPlayer();
+      setStatus("Stopped.");
+    });
+
+    sampleBtn.addEventListener("click", function () {
+      inputEl.value = sampleBtn.getAttribute("data-url");
+      startPlayback(false);
+    });
+
+    checkBtn.addEventListener("click", async function () {
       const target = inputEl.value.trim();
-      outEl.style.display = "none";
-      outEl.innerHTML = "";
-
       if (!target) {
-        statusEl.textContent = "URL podunga first.";
+        setStatus("First URL podunga.");
         return;
       }
-
-      if (/\.(mp4|m3u8|webm)(\?|#|$)/i.test(target)) {
-        statusEl.textContent = "Direct stream link detect aagirukku—player-la load panren...";
-        playStreamUrl(target);
-        return;
-      }
-
-      playBtn.disabled = true;
-      extractBtn.disabled = true;
-      statusEl.textContent = "Launching browser & capturing media requests...";
-
+      setStatus("Checking link status via Worker...");
       try {
-        const res = await fetch("/extract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: target }),
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          statusEl.textContent = "Error: " + (data.detail || res.status);
-        } else {
-          const mediaUrls = Array.isArray(data.media_urls) ? data.media_urls : [];
-          const debugUrls = Array.isArray(data.debug_urls) ? data.debug_urls : [];
-          statusEl.textContent =
-            "Captured: " +
-            mediaUrls.length +
-            " | Seen: " +
-            debugUrls.length +
-            " | Status: " +
-            (data.main_status ?? "?") +
-            " | Title: " +
-            (data.page_title || "n/a");
-
-          if (mediaUrls.length > 0) {
-            outEl.style.display = "block";
-            mediaUrls.forEach(function (u) {
-              const row = document.createElement("div");
-              row.className = "url-item";
-
-              const txt = document.createElement("div");
-              txt.className = "url-text";
-              txt.textContent = u;
-
-              const pBtn = document.createElement("button");
-              pBtn.type = "button";
-              pBtn.className = "secondary-btn";
-              pBtn.textContent = "Play";
-              pBtn.addEventListener("click", function () {
-                playStreamUrl(u);
-              });
-
-              row.appendChild(txt);
-              row.appendChild(pBtn);
-              outEl.appendChild(row);
-            });
-
-            if (data.stream_url) {
-              playStreamUrl(data.stream_url);
-            }
-          } else {
-            outEl.style.display = "block";
-            outEl.textContent =
-              "Seen URLs:" +
-              NL +
-              debugUrls.join(NL) +
-              NL +
-              NL +
-              "HTML Preview:" +
-              NL +
-              (data.html_preview || "");
-          }
-        }
-      } catch (e) {
-        statusEl.textContent = "Request failed: " + e.message;
-      } finally {
-        playBtn.disabled = false;
-        extractBtn.disabled = false;
+        const res = await fetch("/probe?url=" + encodeURIComponent(target));
+        const info = await res.json();
+        setStatus(JSON.stringify(info, null, 2));
+      } catch (err) {
+        setStatus("Probe error: " + err.message);
       }
     });
   </script>
 </body>
 </html>`;
 
-function isValidUrl(raw) {
+function parseHttpUrl(raw) {
   try {
-    const u = new URL(raw.trim());
-    return u.protocol === "http:" || u.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-function isBlocked(text) {
-  const s = (text || "").toLowerCase();
-  return (
-    AD_KEYWORDS.some((k) => s.includes(k)) ||
-    SKIP_WORDS.some((k) => s.includes(k))
-  );
-}
-
-function looksLikeMediaUrl(urlStr, contentType = "") {
-  const u = (urlStr || "").toLowerCase();
-  const ct = (contentType || "").toLowerCase();
-
-  if (
-    ct.startsWith("video/") ||
-    ct.startsWith("audio/") ||
-    ct.includes("mpegurl") ||
-    ct.includes("dash+xml") ||
-    ct.includes("x-mpegurl")
-  ) {
-    return true;
-  }
-
-  return (
-    /\.(mp4|m3u8|mpd|m4s|ts|webm|mkv)(\?|#|$)/i.test(u) ||
-    /stream=1|playlist\.m3u8|master\.m3u8|manifest/i.test(u)
-  );
-}
-
-async function triggerPlayInAllFrames(page) {
-  for (const frame of page.frames()) {
-    try {
-      await frame.evaluate(async () => {
-        const videos = [...document.querySelectorAll("video")];
-        for (const v of videos) {
-          try {
-            v.muted = true;
-            await v.play();
-          } catch {}
-        }
-
-        const btns = [
-          ...document.querySelectorAll(
-            "[class*='play'], [id*='play'], button[aria-label*='play' i], .vjs-big-play-button, .jw-icon-playback, video"
-          ),
-        ];
-        for (const b of btns.slice(0, 5)) {
-          try {
-            b.click();
-          } catch {}
-        }
-      });
-    } catch {}
-  }
-}
-
-async function captureMediaWithBrowser(browserBinding, targetUrl) {
-  const captured = new Set();
-  const seen = new Set();
-  let mainStatus = null;
-  const browser = await launch(browserBinding);
-
-  try {
-    const origin = new URL(targetUrl).origin + "/";
-    const context = await browser.newContext({
-      userAgent: DESKTOP_UA,
-      viewport: { width: 1280, height: 720 },
-      locale: "en-US",
-      extraHTTPHeaders: {
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: origin,
-      },
-    });
-
-    const page = await context.newPage();
-
-    await page.route("**/*", (route) => {
-      const reqUrl = route.request().url();
-      const type = route.request().resourceType();
-      if (isBlocked(reqUrl) || type === "image" || type === "font") {
-        return route.abort();
-      }
-      return route.continue();
-    });
-
-    page.on("request", (req) => {
-      const reqUrl = req.url();
-      if (!isBlocked(reqUrl)) {
-        seen.add(reqUrl);
-        if (looksLikeMediaUrl(reqUrl, "")) {
-          captured.add(reqUrl);
-        }
-      }
-    });
-
-    page.on("response", (res) => {
-      const resUrl = res.url();
-      const ct = res.headers()["content-type"] || "";
-      if (mainStatus === null && res.request().isNavigationRequest()) {
-        mainStatus = res.status();
-      }
-      if (!isBlocked(resUrl)) {
-        seen.add(resUrl);
-        if (looksLikeMediaUrl(resUrl, ct)) {
-          captured.add(resUrl);
-        }
-      }
-    });
-
-    const navRes = await page.goto(targetUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000,
-    });
-    if (navRes && mainStatus === null) {
-      mainStatus = navRes.status();
+    const u = new URL((raw || "").trim());
+    if (u.protocol === "http:" || u.protocol === "https:") {
+      return u;
     }
-
-    await page.waitForTimeout(4000);
-    await triggerPlayInAllFrames(page);
-    await page.waitForTimeout(5000);
-
-    const pageTitle = await page.title().catch(() => "");
-    const html = await page.content().catch(() => "");
-
-    return {
-      mediaUrls: [...captured],
-      debugUrls: [...seen].slice(0, 30),
-      mainStatus,
-      pageTitle,
-      htmlPreview: html.slice(0, 600),
-    };
-  } finally {
-    await browser.close();
+    return null;
+  } catch {
+    return null;
   }
+}
+
+async function handleProbe(targetUrl) {
+  const parsed = parseHttpUrl(targetUrl);
+  if (!parsed) {
+    return Response.json({ ok: false, error: "Invalid HTTP/HTTPS URL" }, { status: 400 });
+  }
+
+  try {
+    const resp = await fetch(parsed.toString(), {
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Referer": parsed.origin + "/",
+        "Range": "bytes=0-1023",
+      },
+      redirect: "follow",
+    });
+
+    const contentType = resp.headers.get("content-type") || "";
+    const contentLength = resp.headers.get("content-length") || "";
+    const acceptRanges = resp.headers.get("accept-ranges") || "";
+    const snippetText = contentType.includes("text") || contentType.includes("html") || contentType.includes("json")
+      ? await resp.text().then((t) => t.slice(0, 300))
+      : "[binary/media stream]";
+
+    return Response.json({
+      ok: resp.ok || resp.status === 206,
+      status: resp.status,
+      statusText: resp.statusText,
+      finalUrl: resp.url,
+      contentType,
+      contentLength,
+      acceptRanges,
+      preview: snippetText,
+    });
+  } catch (err) {
+    return Response.json({ ok: false, error: err.message || "Fetch failed" }, { status: 502 });
+  }
+}
+
+async function handleStreamProxy(request, targetUrl) {
+  const parsed = parseHttpUrl(targetUrl);
+  if (!parsed) {
+    return new Response("Invalid URL", { status: 400 });
+  }
+
+  const upstreamHeaders = new Headers({
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Referer": parsed.origin + "/",
+  });
+
+  const range = request.headers.get("Range");
+  if (range) {
+    upstreamHeaders.set("Range", range);
+  }
+
+  const upstream = await fetch(parsed.toString(), {
+    method: "GET",
+    headers: upstreamHeaders,
+    redirect: "follow",
+  });
+
+  const resHeaders = new Headers();
+  for (const key of [
+    "content-type",
+    "content-length",
+    "content-range",
+    "accept-ranges",
+    "cache-control",
+  ]) {
+    const val = upstream.headers.get(key);
+    if (val) resHeaders.set(key, val);
+  }
+  resHeaders.set("Access-Control-Allow-Origin", "*");
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: resHeaders,
+  });
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request) {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/") {
-      return new Response(HTML_UI, {
+      return new Response(HTML_PLAYER, {
         headers: { "Content-Type": "text/html; charset=UTF-8" },
       });
     }
 
-    if (request.method === "POST" && url.pathname === "/extract") {
-      try {
-        const body = await request.json();
-        const targetUrl = (body && body.url ? body.url : "").trim();
+    if (request.method === "GET" && url.pathname === "/probe") {
+      return handleProbe(url.searchParams.get("url") || "");
+    }
 
-        if (!isValidUrl(targetUrl)) {
-          return Response.json({ detail: "Invalid URL" }, { status: 400 });
-        }
-
-        if (!env || !env.BROWSER) {
-          return Response.json(
-            {
-              detail:
-                "BROWSER binding missing. Cloudflare Worker settings-la Browser binding add pannunga.",
-            },
-            { status: 500 }
-          );
-        }
-
-        const result = await captureMediaWithBrowser(env.BROWSER, targetUrl);
-        const preferred =
-          result.mediaUrls.find((u) => /\.(m3u8|mp4|mpd)(\?|#|$)/i.test(u)) ||
-          result.mediaUrls[0] ||
-          null;
-
-        return Response.json({
-          stream_url: preferred,
-          media_urls: result.mediaUrls,
-          debug_urls: result.debugUrls,
-          main_status: result.mainStatus,
-          page_title: result.pageTitle,
-          html_preview: result.htmlPreview,
-        });
-      } catch (err) {
-        return Response.json(
-          { detail: err && err.message ? err.message : "Browser capture error" },
-          { status: 500 }
-        );
-      }
+    if (request.method === "GET" && url.pathname === "/stream") {
+      return handleStreamProxy(request, url.searchParams.get("url") || "");
     }
 
     return new Response("Not Found", { status: 404 });
