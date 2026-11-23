@@ -69,7 +69,7 @@ const HTML_UI = `<!DOCTYPE html>
       border-radius: 8px;
       margin-top: 14px;
       word-break: break-all;
-      font-size: 13px;
+      font-size: 12px;
       color: #38bdf8;
       white-space: pre-wrap;
     }
@@ -117,11 +117,23 @@ const HTML_UI = `<!DOCTYPE html>
           statusEl.textContent = "Error: " + (data.detail || res.status);
         } else {
           const mediaUrls = Array.isArray(data.media_urls) ? data.media_urls : [];
-          statusEl.textContent = "Captured media URLs: " + mediaUrls.length;
-          outEl.textContent =
-            mediaUrls.length > 0
-              ? mediaUrls.join(NL)
-              : "No media URL captured";
+          const debugUrls = Array.isArray(data.debug_urls) ? data.debug_urls : [];
+          statusEl.textContent =
+            "Captured media URLs: " +
+            mediaUrls.length +
+            " | Seen URLs: " +
+            debugUrls.length;
+
+          if (mediaUrls.length > 0) {
+            outEl.textContent = mediaUrls.join(NL);
+          } else if (debugUrls.length > 0) {
+            outEl.textContent =
+              "No direct media match. Sample network URLs:" +
+              NL +
+              debugUrls.join(NL);
+          } else {
+            outEl.textContent = "No media URL captured";
+          }
           outEl.style.display = "block";
         }
       } catch (e) {
@@ -185,10 +197,10 @@ async function triggerPlayInAllFrames(page) {
 
         const btns = [
           ...document.querySelectorAll(
-            "[class*='play'], [id*='play'], button[aria-label*='play' i], .vjs-big-play-button, .jw-icon-playback"
+            "[class*='play'], [id*='play'], button[aria-label*='play' i], .vjs-big-play-button, .jw-icon-playback, video"
           ),
         ];
-        for (const b of btns.slice(0, 4)) {
+        for (const b of btns.slice(0, 5)) {
           try {
             b.click();
           } catch {}
@@ -200,6 +212,7 @@ async function triggerPlayInAllFrames(page) {
 
 async function captureMediaWithBrowser(browserBinding, targetUrl) {
   const captured = new Set();
+  const seen = new Set();
   const browser = await launch(browserBinding);
 
   try {
@@ -216,16 +229,22 @@ async function captureMediaWithBrowser(browserBinding, targetUrl) {
 
     page.on("request", (req) => {
       const reqUrl = req.url();
-      if (!isBlocked(reqUrl) && looksLikeMediaUrl(reqUrl, "")) {
-        captured.add(reqUrl);
+      if (!isBlocked(reqUrl)) {
+        seen.add(reqUrl);
+        if (looksLikeMediaUrl(reqUrl, "")) {
+          captured.add(reqUrl);
+        }
       }
     });
 
     page.on("response", (res) => {
       const resUrl = res.url();
       const ct = res.headers()["content-type"] || "";
-      if (!isBlocked(resUrl) && looksLikeMediaUrl(resUrl, ct)) {
-        captured.add(resUrl);
+      if (!isBlocked(resUrl)) {
+        seen.add(resUrl);
+        if (looksLikeMediaUrl(resUrl, ct)) {
+          captured.add(resUrl);
+        }
       }
     });
 
@@ -236,9 +255,12 @@ async function captureMediaWithBrowser(browserBinding, targetUrl) {
 
     await page.waitForTimeout(5000);
     await triggerPlayInAllFrames(page);
-    await page.waitForTimeout(6000);
+    await page.waitForTimeout(7000);
 
-    return [...captured];
+    return {
+      mediaUrls: [...captured],
+      debugUrls: [...seen].slice(0, 30),
+    };
   } finally {
     await browser.close();
   }
@@ -273,15 +295,16 @@ export default {
           );
         }
 
-        const mediaUrls = await captureMediaWithBrowser(env.BROWSER, targetUrl);
+        const result = await captureMediaWithBrowser(env.BROWSER, targetUrl);
         const preferred =
-          mediaUrls.find((u) => /\.(m3u8|mp4|mpd)(\?|#|$)/i.test(u)) ||
-          mediaUrls[0] ||
+          result.mediaUrls.find((u) => /\.(m3u8|mp4|mpd)(\?|#|$)/i.test(u)) ||
+          result.mediaUrls[0] ||
           null;
 
         return Response.json({
           stream_url: preferred,
-          media_urls: mediaUrls,
+          media_urls: result.mediaUrls,
+          debug_urls: result.debugUrls,
         });
       } catch (err) {
         return Response.json(
