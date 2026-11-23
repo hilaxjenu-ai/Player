@@ -1,380 +1,356 @@
-const HTML_PLAYER = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Direct Stream Player</title>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      background: #090d16;
-      color: #f1f5f9;
-      font-family: system-ui, -apple-system, sans-serif;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
-      padding: 24px 14px;
-    }
-    .app {
-      width: 100%;
-      max-width: 820px;
-      background: #111827;
-      border: 1px solid #1f2937;
-      border-radius: 14px;
-      padding: 20px;
-      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-    }
-    .title {
-      margin: 0 0 14px;
-      font-size: 20px;
-      font-weight: 700;
-    }
-    .controls {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-bottom: 14px;
-    }
-    .url-input {
-      flex: 1 1 280px;
-      padding: 12px 14px;
-      border-radius: 10px;
-      border: 1px solid #374151;
-      background: #090d16;
-      color: #fff;
-      font-size: 14px;
-      outline: none;
-    }
-    .url-input:focus {
-      border-color: #3b82f6;
-    }
-    .btn {
-      padding: 12px 16px;
-      border: none;
-      border-radius: 10px;
-      font-size: 14px;
-      font-weight: 600;
-      color: #fff;
-      cursor: pointer;
-    }
-    .btn-direct { background: #16a34a; }
-    .btn-proxy { background: #2563eb; }
-    .btn-stop { background: #475569; }
-    .stage {
-      width: 100%;
-      background: #000;
-      border: 1px solid #1f2937;
-      border-radius: 12px;
-      overflow: hidden;
-    }
-    video {
-      width: 100%;
-      max-height: 450px;
-      display: block;
-      background: #000;
-    }
-    .meta {
-      margin-top: 12px;
-      padding: 12px;
-      border-radius: 10px;
-      background: #090d16;
-      border: 1px solid #1f2937;
-      font-size: 13px;
-      color: #94a3b8;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-    .quick-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
-    }
-    .chip {
-      padding: 6px 10px;
-      border-radius: 8px;
-      border: 1px solid #334155;
-      background: #1e293b;
-      color: #cbd5e1;
-      font-size: 12px;
-      cursor: pointer;
-    }
-  </style>
-</head>
-<body>
-  <div class="app">
-    <h1 class="title">Direct Stream Player</h1>
+import { launch } from "@cloudflare/playwright";
 
-    <div class="controls">
-      <input
-        id="streamUrl"
-        class="url-input"
-        type="url"
-        placeholder="Paste .mp4 / .m3u8 / .webm link here..."
-      />
-      <button id="playDirect" class="btn btn-direct" type="button">Play Direct</button>
-      <button id="playProxy" class="btn btn-proxy" type="button">Play via Proxy</button>
-      <button id="stopBtn" class="btn btn-stop" type="button">Stop</button>
-    </div>
+const NAV_TIMEOUT_MS = 20000;
+const MAX_WAIT_MS = 15000;
+const POLL_MS = 1000;
+const SETTLE_MS = 1500;
 
-    <div class="stage">
-      <video id="player" controls playsinline preload="metadata"></video>
-    </div>
+const UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-    <div id="statusBox" class="meta">Ready. Direct stream link paste panni Play Direct or Play via Proxy click pannunga.</div>
+const AD_HOSTS = [
+  "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+  "google-analytics.com", "googletagmanager.com", "googletagservices.com",
+  "adservice.google.com", "facebook.net", "connect.facebook.net",
+  "scorecardresearch.com", "quantserve.com", "taboola.com", "outbrain.com",
+  "adnxs.com", "criteo.com", "criteo.net", "pubmatic.com", "rubiconproject.com",
+  "openx.net", "adsrvr.org", "moatads.com", "hotjar.com", "segment.io",
+  "mixpanel.com", "amazon-adsystem.com", "popads.net", "propellerads.com",
+  "exoclick.com", "juicyads.com", "adsterra.com", "yandex.ru", "mc.yandex.ru",
+  "imasdk.googleapis.com", "advertising.com", "serving-sys.com", "smartadserver.com",
+];
 
-    <div class="quick-row">
-      <button
-        id="sampleMp4"
-        class="chip"
-        type="button"
-        data-url="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-      >
-        Test Sample MP4
-      </button>
-      <button id="checkHeadersBtn" class="chip" type="button">
-        Check Link Status
-      </button>
-    </div>
-  </div>
+const MEDIA_EXT_RE = /\.(mp4|m4v|webm|mkv|mov|m3u8|mpd|mp3|m4a|aac|ogg|oga|ogv|flac|wav)$/i;
+const SEGMENT_RE = /\.(ts|m4s|cmfv|cmfa)$/i;
+const MEDIA_CT_RE =
+  /^(video\/|audio\/|application\/(vnd\.apple\.mpegurl|x-mpegurl|dash\+xml|octet-stream-media))/i;
 
-  <script>
-    const inputEl = document.getElementById("streamUrl");
-    const directBtn = document.getElementById("playDirect");
-    const proxyBtn = document.getElementById("playProxy");
-    const stopBtn = document.getElementById("stopBtn");
-    const sampleBtn = document.getElementById("sampleMp4");
-    const checkBtn = document.getElementById("checkHeadersBtn");
-    const videoEl = document.getElementById("player");
-    const statusEl = document.getElementById("statusBox");
+function isAdUrl(u) {
+  try {
+    const host = new URL(u).hostname.toLowerCase();
+    return AD_HOSTS.some((d) => host === d || host.endsWith("." + d));
+  } catch (e) {
+    return true;
+  }
+}
 
-    let hls = null;
+function pathOf(u) {
+  try {
+    return new URL(u).pathname;
+  } catch (e) {
+    return "";
+  }
+}
 
-    function setStatus(msg) {
-      statusEl.textContent = msg;
-    }
+function isPrivateHost(host) {
+  const h = host.toLowerCase();
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".internal")) return true;
+  if (/^\[.*\]$/.test(h)) return true; // block IPv6 literals
+  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+  }
+  return false;
+}
 
-    function cleanupPlayer() {
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
-      videoEl.pause();
-      videoEl.removeAttribute("src");
-      videoEl.load();
-    }
+function parseTarget(raw) {
+  if (typeof raw !== "string") return null;
+  let s = raw.trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = "https://" + s;
+  let u;
+  try {
+    u = new URL(s);
+  } catch (e) {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  if (isPrivateHost(u.hostname)) return null;
+  return u.toString();
+}
 
-    function startPlayback(useProxy) {
-      const rawUrl = inputEl.value.trim();
-      if (!rawUrl) {
-        setStatus("First stream URL podunga.");
-        return;
-      }
+function rank(u) {
+  const p = pathOf(u).toLowerCase();
+  if (p.endsWith(".m3u8")) return 0;
+  if (p.endsWith(".mpd")) return 1;
+  if (p.endsWith(".mp4") || p.endsWith(".webm") || p.endsWith(".m4v")) return 2;
+  return 3;
+}
 
-      let finalUrl = rawUrl;
-      if (useProxy) {
-        finalUrl = "/stream?url=" + encodeURIComponent(rawUrl);
-      }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-      cleanupPlayer();
-      setStatus((useProxy ? "Proxy" : "Direct") + " mode-la load aagudhu:\\n" + rawUrl);
+function json(obj, status) {
+  return new Response(JSON.stringify(obj, null, 2), {
+    status: status || 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": "*",
+    },
+  });
+}
 
-      const isM3u8 = /\.m3u8(\?|#|$)/i.test(rawUrl);
-
-      if (isM3u8 && window.Hls && window.Hls.isSupported()) {
-        hls = new window.Hls({ enableWorker: true });
-        hls.loadSource(finalUrl);
-        hls.attachMedia(videoEl);
-        hls.on(window.Hls.Events.MANIFEST_PARSED, function () {
-          setStatus("HLS manifest loaded. Playing...");
-          videoEl.play().catch(function () {
-            setStatus("HLS ready. Video controls-la Play press pannunga.");
-          });
+async function tryPlay(page) {
+  const selectors = [
+    ".vjs-big-play-button",
+    ".jw-icon-display",
+    ".plyr__control--overlaid",
+    "button[aria-label*='play' i]",
+    "[class*='play-btn' i]",
+    "[class*='play_button' i]",
+    "[class*='playbutton' i]",
+    "video",
+  ];
+  for (const frame of page.frames()) {
+    try {
+      await frame.evaluate(() => {
+        document.querySelectorAll("video,audio").forEach((m) => {
+          try {
+            m.muted = true;
+            const p = m.play();
+            if (p && p.catch) p.catch(() => {});
+          } catch (e) {}
         });
-        hls.on(window.Hls.Events.ERROR, function (_, data) {
-          if (data && data.fatal) {
-            setStatus("HLS Fatal Error: " + (data.type || "") + " - " + (data.details || "failed"));
-          }
-        });
-        return;
-      }
-
-      videoEl.src = finalUrl;
-      videoEl.play()
-        .then(function () {
-          setStatus("Playing successfully (" + (useProxy ? "Proxy" : "Direct") + ").");
-        })
-        .catch(function (err) {
-          setStatus(
-            "Autoplay/Load note: " +
-              (err && err.message ? err.message : "Controls-la play try pannunga or Check Link Status click pannunga.")
-          );
-        });
-    }
-
-    videoEl.addEventListener("error", function () {
-      const e = videoEl.error;
-      const map = {
-        1: "MEDIA_ERR_ABORTED (Playback stopped)",
-        2: "MEDIA_ERR_NETWORK (Network error / 403 / 404 / expired / blocked)",
-        3: "MEDIA_ERR_DECODE (Video codec/stream corrupted or unsupported)",
-        4: "MEDIA_ERR_SRC_NOT_SUPPORTED (Format not supported or URL returned HTML/error)"
-      };
-      setStatus("Video Element Error: " + (e ? (map[e.code] || "Code " + e.code) : "Unknown error"));
-    });
-
-    directBtn.addEventListener("click", function () {
-      startPlayback(false);
-    });
-
-    proxyBtn.addEventListener("click", function () {
-      startPlayback(true);
-    });
-
-    stopBtn.addEventListener("click", function () {
-      cleanupPlayer();
-      setStatus("Stopped.");
-    });
-
-    sampleBtn.addEventListener("click", function () {
-      inputEl.value = sampleBtn.getAttribute("data-url");
-      startPlayback(false);
-    });
-
-    checkBtn.addEventListener("click", async function () {
-      const target = inputEl.value.trim();
-      if (!target) {
-        setStatus("First URL podunga.");
-        return;
-      }
-      setStatus("Checking link status via Worker...");
+      });
+    } catch (e) {}
+    for (const sel of selectors) {
       try {
-        const res = await fetch("/probe?url=" + encodeURIComponent(target));
-        const info = await res.json();
-        setStatus(JSON.stringify(info, null, 2));
-      } catch (err) {
-        setStatus("Probe error: " + err.message);
-      }
-    });
-  </script>
-</body>
-</html>`;
-
-function parseHttpUrl(raw) {
-  try {
-    const u = new URL((raw || "").trim());
-    if (u.protocol === "http:" || u.protocol === "https:") {
-      return u;
+        await frame.locator(sel).first().click({ timeout: 600, force: true });
+        break;
+      } catch (e) {}
     }
-    return null;
-  } catch {
-    return null;
   }
 }
 
-async function handleProbe(targetUrl) {
-  const parsed = parseHttpUrl(targetUrl);
-  if (!parsed) {
-    return Response.json({ ok: false, error: "Invalid HTTP/HTTPS URL" }, { status: 400 });
+async function extract(env, targetUrl) {
+  const found = new Map(); // url -> info
+  const sample = [];
+  const errors = [];
+  let segmentCount = 0;
+  let mainStatus = null;
+  let title = "";
+  let finalUrl = targetUrl;
+  let browser = null;
+
+  function record(url, via, extra) {
+    if (!url || url.startsWith("blob:") || url.startsWith("data:")) return;
+    if (!/^https?:/i.test(url)) return;
+    if (isAdUrl(url)) return;
+    const p = pathOf(url);
+    if (SEGMENT_RE.test(p)) {
+      segmentCount++;
+      return;
+    }
+    if (!found.has(url)) {
+      found.set(url, Object.assign({ via }, extra || {}));
+    }
+  }
+
+  function attach(page) {
+    page.on("request", (req) => {
+      try {
+        const url = req.url();
+        if (sample.length < 25 && !isAdUrl(url) && !/\.(png|jpe?g|gif|svg|ico|woff2?|css)(\?|$)/i.test(url)) {
+          sample.push(req.resourceType() + " " + url.slice(0, 200));
+        }
+        if (req.resourceType() === "media" || MEDIA_EXT_RE.test(pathOf(url))) {
+          record(url, "request");
+        }
+      } catch (e) {}
+    });
+    page.on("response", (res) => {
+      try {
+        const url = res.url();
+        const ct = (res.headers()["content-type"] || "").split(";")[0].trim();
+        if (MEDIA_CT_RE.test(ct) || MEDIA_EXT_RE.test(pathOf(url))) {
+          record(url, "response", { contentType: ct, status: res.status() });
+        }
+      } catch (e) {}
+    });
   }
 
   try {
-    const resp = await fetch(parsed.toString(), {
-      method: "GET",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        "Referer": parsed.origin + "/",
-        "Range": "bytes=0-1023",
-      },
-      redirect: "follow",
+    browser = await launch(env.BROWSER);
+    const context = await browser.newContext({
+      userAgent: UA,
+      viewport: { width: 1280, height: 720 },
+      locale: "en-US",
     });
 
-    const contentType = resp.headers.get("content-type") || "";
-    const contentLength = resp.headers.get("content-length") || "";
-    const acceptRanges = resp.headers.get("accept-ranges") || "";
-    const snippetText = contentType.includes("text") || contentType.includes("html") || contentType.includes("json")
-      ? await resp.text().then((t) => t.slice(0, 300))
-      : "[binary/media stream]";
-
-    return Response.json({
-      ok: resp.ok || resp.status === 206,
-      status: resp.status,
-      statusText: resp.statusText,
-      finalUrl: resp.url,
-      contentType,
-      contentLength,
-      acceptRanges,
-      preview: snippetText,
+    context.on("page", (popup) => {
+      // Popups are almost always ads; record nothing and close them.
+      popup.close().catch(() => {});
     });
-  } catch (err) {
-    return Response.json({ ok: false, error: err.message || "Fetch failed" }, { status: 502 });
+
+    const page = await context.newPage();
+    attach(page);
+
+    try {
+      const resp = await page.goto(targetUrl, {
+        waitUntil: "domcontentloaded",
+        timeout: NAV_TIMEOUT_MS,
+      });
+      mainStatus = resp ? resp.status() : null;
+    } catch (e) {
+      errors.push("navigation: " + String(e && e.message ? e.message : e).slice(0, 300));
+    }
+
+    const start = Date.now();
+    let lastFoundAt = 0;
+    let lastCount = 0;
+    let tick = 0;
+    while (Date.now() - start < MAX_WAIT_MS) {
+      if (tick % 2 === 0) {
+        try {
+          await tryPlay(page);
+        } catch (e) {}
+      }
+      await sleep(POLL_MS);
+      tick++;
+      if (found.size !== lastCount) {
+        lastCount = found.size;
+        lastFoundAt = Date.now();
+      }
+      if (found.size > 0 && Date.now() - lastFoundAt >= SETTLE_MS) break;
+    }
+
+    try {
+      title = await page.title();
+    } catch (e) {}
+    try {
+      finalUrl = page.url();
+    } catch (e) {}
+    let frameUrls = [];
+    try {
+      frameUrls = page.frames().map((f) => f.url()).filter((u) => u && u !== "about:blank").slice(0, 15);
+    } catch (e) {}
+
+    const media = Array.from(found.keys()).sort((a, b) => rank(a) - rank(b));
+    const result = {
+      ok: media.length > 0,
+      input_url: targetUrl,
+      stream_url: media.length ? media[0] : null,
+      media_urls: media,
+    };
+
+    const debug = {
+      status: mainStatus,
+      title: title,
+      final_url: finalUrl,
+      frames: frameUrls,
+      segments_ignored: segmentCount,
+    };
+
+    if (!media.length) {
+      const t = (title || "").toLowerCase();
+      const blocked =
+        mainStatus === 403 || mainStatus === 429 || mainStatus === 503 ||
+        /just a moment|attention required|access denied|captcha|verify you are human|blocked/.test(t);
+      debug.sample_requests = sample;
+      debug.errors = errors;
+      debug.message = blocked
+        ? "Target appears to block headless or datacenter traffic (status/title suggests a bot challenge)."
+        : "No media requests captured. The player may need a user gesture, a login, a longer wait, or the stream may be loaded after a multi-step redirect.";
+    } else if (errors.length) {
+      debug.errors = errors;
+    }
+    result.debug = debug;
+    return result;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (e) {}
+    }
   }
 }
 
-async function handleStreamProxy(request, targetUrl) {
-  const parsed = parseHttpUrl(targetUrl);
-  if (!parsed) {
-    return new Response("Invalid URL", { status: 400 });
-  }
-
-  const upstreamHeaders = new Headers({
-    "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    "Referer": parsed.origin + "/",
-  });
-
-  const range = request.headers.get("Range");
-  if (range) {
-    upstreamHeaders.set("Range", range);
-  }
-
-  const upstream = await fetch(parsed.toString(), {
-    method: "GET",
-    headers: upstreamHeaders,
-    redirect: "follow",
-  });
-
-  const resHeaders = new Headers();
-  for (const key of [
-    "content-type",
-    "content-length",
-    "content-range",
-    "accept-ranges",
-    "cache-control",
-  ]) {
-    const val = upstream.headers.get(key);
-    if (val) resHeaders.set(key, val);
-  }
-  resHeaders.set("Access-Control-Allow-Origin", "*");
-
-  return new Response(upstream.body, {
-    status: upstream.status,
-    headers: resHeaders,
-  });
-}
+const HTML = [
+  "<!doctype html>",
+  "<html lang='en'><head>",
+  "<meta charset='utf-8'>",
+  "<meta name='viewport' content='width=device-width,initial-scale=1'>",
+  "<title>Stream Extractor</title>",
+  "<style>",
+  "body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#111;color:#eee}",
+  "h1{font-size:20px;margin:0 0 12px}",
+  "input{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border-radius:8px;border:1px solid #444;background:#1c1c1c;color:#eee}",
+  "button{margin-top:10px;width:100%;padding:12px;font-size:16px;border:0;border-radius:8px;background:#f6821f;color:#fff}",
+  "button:disabled{opacity:.6}",
+  "pre{white-space:pre-wrap;word-break:break-all;background:#1c1c1c;padding:12px;border-radius:8px;margin-top:14px;font-size:13px}",
+  "</style></head><body>",
+  "<h1>Stream Extractor</h1>",
+  "<input id='u' type='url' placeholder='https://example.com/video-page' autocomplete='off'>",
+  "<button id='b'>Extract</button>",
+  "<pre id='o'>Ready.</pre>",
+  "<script>",
+  "var b=document.getElementById('b');",
+  "var o=document.getElementById('o');",
+  "var u=document.getElementById('u');",
+  "b.addEventListener('click',function(){",
+  "  var v=u.value.trim();",
+  "  if(!v){o.textContent='Enter a URL first.';return;}",
+  "  b.disabled=true;o.textContent='Working (can take up to ~40s)...';",
+  "  fetch('/extract',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({url:v})})",
+  "    .then(function(r){return r.text();})",
+  "    .then(function(t){o.textContent=t;})",
+  "    .catch(function(e){o.textContent='Request failed: '+e;})",
+  "    .then(function(){b.disabled=false;});",
+  "});",
+  "</script>",
+  "</body></html>",
+].join("\n");
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
-    if (request.method === "GET" && url.pathname === "/") {
-      return new Response(HTML_PLAYER, {
-        headers: { "Content-Type": "text/html; charset=UTF-8" },
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "GET,POST,OPTIONS",
+          "access-control-allow-headers": "content-type",
+        },
       });
     }
 
-    if (request.method === "GET" && url.pathname === "/probe") {
-      return handleProbe(url.searchParams.get("url") || "");
+    if (request.method === "GET" && url.pathname === "/") {
+      return new Response(HTML, {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
     }
 
-    if (request.method === "GET" && url.pathname === "/stream") {
-      return handleStreamProxy(request, url.searchParams.get("url") || "");
+    if (request.method === "POST" && url.pathname === "/extract") {
+      let body;
+      try {
+        body = await request.json();
+      } catch (e) {
+        return json({ ok: false, error: "Body must be JSON: {\"url\":\"https://...\"}" }, 400);
+      }
+      const target = parseTarget(body && body.url);
+      if (!target) {
+        return json({ ok: false, error: "Invalid or disallowed URL. Use a public http(s) URL." }, 400);
+      }
+      if (!env.BROWSER) {
+        return json({ ok: false, error: "BROWSER binding is missing in wrangler.toml." }, 500);
+      }
+      try {
+        const result = await extract(env, target);
+        return json(result, 200);
+      } catch (e) {
+        return json(
+          { ok: false, input_url: target, error: String(e && e.message ? e.message : e).slice(0, 500) },
+          500
+        );
+      }
     }
 
-    return new Response("Not Found", { status: 404 });
+    return json({ ok: false, error: "Not found" }, 404);
   },
 };
