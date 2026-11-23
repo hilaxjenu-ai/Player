@@ -1,6 +1,5 @@
-name = "stream-extractor-browser"
 main = "src/index.js"
-compatibility_date = "2025-09-15"
+compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
 [browser]
