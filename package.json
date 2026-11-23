@@ -7,9 +7,9 @@
     "dev": "wrangler dev"
   },
   "dependencies": {
-    "@cloudflare/playwright": "^0.1.0"
+    "@cloudflare/playwright": "latest"
   },
   "devDependencies": {
-    "wrangler": "^3.100.0"
+    "wrangler": "latest"
   }
 }
